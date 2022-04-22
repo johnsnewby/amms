@@ -46,14 +46,11 @@
 (defmethod tez-per-normalised-token ((u uniswapv1))
   (/ (mutez-per-token u) (expt 10 (- (mutez-zeroes u) (token-zeroes u)))))
 
-(defun swap (x y k swapped-x)
-  ;;            let bought = natural_to_mutez (((tokensSold * 9972n * (mutez_to_natural storage.xtzPool)) / (storage.tokenPool * 10000n + (tokensSold * 9972n)))) in
-
-  (format t "~$ ~$ ~$ ~$
-" x y k swapped-x)
-  (*
-  (- y (/ k (+ x swapped-x))))
-
+(defun swap (x y k swapped-x cost)
+  (let ((numerator (numerator cost))
+	(denominator (denominator cost)))
+    (/ (* swapped-x numerator y)
+       (+ (* x denominator) (* swapped-x numerator)))))
 
 ;;;; simulate a swap of token for mutez, and return a list of
 ;;; (mutez-returned new-swap)
@@ -63,8 +60,7 @@
   (let* ((token (token u))
 	 (mutez (mutez u))
 	 (k (k u))
-	 (mutez-swapped (swap token mutez k swapped-token))
-	 (mutez-out (* mutez-swapped) (cost u))
+	 (mutez-out (swap token mutez k swapped-token (cost u)))
 	 (new-mutez (- mutez mutez-swapped))
 	 (new-token (+ token swapped-token)))
     `(
