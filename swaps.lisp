@@ -2,9 +2,6 @@
 (ql:quickload :str)
 (ql:quickload :yason)
 
-
-;;;; (postmodern:connect-toplevel "tezos" "tezos" "tezos" "localhost" :port 5432)
-(postmodern:connect-toplevel "amm" "amm" "amm" "localhost" :port 5433)
 (setq postmodern:*escape-sql-names-p* nil)
 
 (defvar *postgres-connection-string*
@@ -27,28 +24,28 @@
 
 (defmethod p ((u uniswapv1))
   (format t
-	  "token: ~S mutez: ~S k: ~S token-per-tez ~7$ tez-per-token ~7$ cost: ~S
+	  "token: ~S mutez: ~S k: ~S normalised-token-per-tez ~7$ tez-per-normalised-token ~7$ cost: ~S
 "
 	  (token u)
 	  (mutez u)
 	  (k u)
-	  (token-per-mutez u)
-	  (tez-per-token u)
+	  (normalised-token-per-tez u)
+	  (tez-per-normalised-token u)
 	  (cost u)))
 
 (defmethod token-per-mutez ((u uniswapv1))
   (/ (token u) (mutez u)))
 
-(defmethod token-per-tez ((u uniswapv1))
-  (*
-   (token-per-mutez u)
-   (expt 10 (- (token-zeroes u) (mutez-zeroes u)))))
+(defmethod normalised-token-per-tez ((u uniswapv1))
+  (/ (token-per-mutez u) (expt 10 (- (token-zeroes u) (mutez-zeroes u)))))
 
 (defmethod mutez-per-token ((u uniswapv1))
-  (/ (mutez u) (token u)))
+  (/ (mutez u)  (token u)))
 
-(defmethod tez-per-token ((u uniswapv1))
-  (* (expt 10 (mutez-zeroes u)) (mutez-per-token u)))
+(defmethod tez-per-normalised-token ((u uniswapv1))
+  (/
+   (/ (mutez-per-token u) (expt 10 (mutez-zeroes u)))
+   (/ (expt 10 (token-zeroes u)))))
 
 (defun swap (x y k swapped)
   (- y (/ k (+ x swapped))))
@@ -71,8 +68,10 @@
 	(k (slot-value a 'k))
 	(new-token (swap mutez token k swapped-mutez))
 	(new-mutez (- mutez swapped-mutez)))
-    (make-instance 'uniswapv1 :token new-token mutez new-mutez :k k :cost (slot-value a 'cost)
-		   :token-zeroes (token-zeroes a))))
+    (make-instance 'uniswapv1 :token new-token mutez new-mutez :k k
+			      :cost (slot-value a 'cost)
+			      :mutez-zeroes (mutez-zeroes a)
+			      :token-zeroes (token-zeroes a))))
 
 ;;;;----------------------------------------------------------------------------
 ;;;; Classes for loading swaps from disk
@@ -84,6 +83,7 @@
    (mutez-col :initarg :mutez-col :accessor mutez-col)
    (cost :initarg :cost :accessor cost)
    (token-zeroes :initarg :token-zeroes :accessor token-zeroes)
+   (mutez-zeroes :initarg :mutez-zeroes :initform 6 :accessor mutez-zeroes)
    (quermutez :initform nil :accessor query)
    (swap-class :initarg :swap-class :accessor swap-class)))
 
@@ -118,10 +118,11 @@ Vortex kUSD-XTZ
 	(make-instance 'ondisk :schema-name "Vortex kUSD-XTZ DEX"
 			       :table-name "storage"
 			       :token-col "tokenPool" :mutez-col "xtzPool"
-			       :cost 9972/10000 :token-zeroes 10
+			       :cost 9972/10000 :token-zeroes 18
 			       :swap-class 'uniswapv1))
   (p (setf swap
-      (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1" :port 5433)
+	   (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1"
+					 :port 5433 :pooled-p t)
 	(let* ((od (init-ondisk vortex-kUSD-XTZ))
 	       (swap (get-latest-swap od)))
 	  swap))))
@@ -131,12 +132,14 @@ Vortex kUSD-XTZ
 	(make-instance 'ondisk :schema-name "Vortex USDtz-XTZ DEX"
 			       :table-name "storage"
 			       :token-col "tokenPool" :mutez-col "xtzPool"
-			       :cost 9972/10000 :token-zeroes 0
+			       :cost 9972/10000 :token-zeroes 6
 			       :swap-class 'uniswapv1))
   (p (setf swap
-      (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1" :port 5433)
+	   (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1"
+					 :port 5433 :pooled-p t)
 	(let* ((od (init-ondisk vortex-USDtz-XTZ))
 	       (swap (get-latest-swap od)))
 	  swap)))))
 
 (swap (token swap) (mutez swap) (k swap) 100)
+(token-zeroes vortex-kUSD-XTZ)
