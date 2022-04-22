@@ -52,17 +52,24 @@
     (/ (* swapped-x numerator y)
        (+ (* x denominator) (* swapped-x numerator)))))
 
+(defun fee (x y k swapped-x cost)
+  (let ((numerator (numerator cost))
+	(denominator (denominator cost)))
+    (/ (* swapped-x numerator y)
+       (+ (* x denominator) (* swapped-x numerator)))))
+
 ;;;; simulate a swap of token for mutez, and return a list of
 ;;; (mutez-returned new-swap)
-(defmethod swap-token ((u uniswapv1) swapped-token )
+(defmethod swap-token ((u uniswapv1) swapped-token)
   (format t "CoSt ~S
 " (cost u))
   (let* ((token (token u))
 	 (mutez (mutez u))
 	 (k (k u))
 	 (mutez-out (swap token mutez k swapped-token (cost u)))
-	 (new-mutez (- mutez mutez-swapped))
-	 (new-token (+ token swapped-token)))
+	 (fee (fee token mutez k swapped-token (cost u))))
+	 (new-mutez (- mutez mutez-out fee))
+	 (new-token (+ token swapped-token))
     `(
       ,mutez-out
       ,(init (make-instance 'uniswapv1
