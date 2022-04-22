@@ -1,3 +1,4 @@
+(ql:quickload :fiveam)
 (ql:quickload :postmodern)
 (ql:quickload :str)
 (ql:quickload :yason)
@@ -9,6 +10,7 @@
 
 ;;;;----------------------------------------------------------------------------
 ;;;; Uniswap v1 class
+;;;; https://github.com/Smartlinkhub/DEX/blob/master/dex.mligo
 
 (defclass uniswapv1 ()
   ((token :initarg :token :accessor token)
@@ -25,8 +27,7 @@
 (defmethod p ((u uniswapv1))
   (format t
 	  "token: ~S mutez: ~S k: ~S normalised-token-per-tez ~7$ tez-per-normalised-token ~7$ cost: ~S
-"
-	  (token u)
+"	  (token u)
 	  (mutez u)
 	  (k u)
 	  (normalised-token-per-tez u)
@@ -43,35 +44,51 @@
   (/ (mutez u)  (token u)))
 
 (defmethod tez-per-normalised-token ((u uniswapv1))
-  (/
-   (/ (mutez-per-token u) (expt 10 (mutez-zeroes u)))
-   (/ (expt 10 (token-zeroes u)))))
+  (/ (mutez-per-token u) (expt 10 (- (mutez-zeroes u) (token-zeroes u)))))
 
-(defun swap (x y k swapped)
-  (- y (/ k (+ x swapped))))
+(defun swap (x y k swapped-x)
+  ;;            let bought = natural_to_mutez (((tokensSold * 9972n * (mutez_to_natural storage.xtzPool)) / (storage.tokenPool * 10000n + (tokensSold * 9972n)))) in
+
+  (format t "~$ ~$ ~$ ~$
+" x y k swapped-x)
+  (*
+  (- y (/ k (+ x swapped-x))))
 
 
-;;;; simulate a swap of token, and return a new uniswap object with the
-;;;; results
-(defmethod swap-token ((a uniswapv1) swapped-token )
-  (let* ((token (slot-value a 'token))
-	(mutez (slot-value a 'mutez))
-	(k (slot-value a 'k))
-	(new-token (- token swapped-token))
-	(new-mutez (swap token mutez k swapped-token)))
-    (init (make-instance 'uniswapv1 :token new-token mutez new-mutez :cost (cost a)
-		   :token-zeroes (token-zeroes a)))))
+;;;; simulate a swap of token for mutez, and return a list of
+;;; (mutez-returned new-swap)
+(defmethod swap-token ((u uniswapv1) swapped-token )
+  (format t "CoSt ~S
+" (cost u))
+  (let* ((token (token u))
+	 (mutez (mutez u))
+	 (k (k u))
+	 (mutez-swapped (swap token mutez k swapped-token))
+	 (mutez-out (* mutez-swapped) (cost u))
+	 (new-mutez (- mutez mutez-swapped))
+	 (new-token (+ token swapped-token)))
+    `(
+      ,mutez-out
+      ,(init (make-instance 'uniswapv1
+			    :token new-token
+			    :mutez new-mutez
+			    :cost (cost u)
+			    :token-zeroes (token-zeroes u))))))
 
 (defmethod swap-mutez ((a uniswapv1) swapped-mutez)
-  (let* ((token (slot-value a 'token))Z
-	(mutez (slot-value a 'mutez))
-	(k (slot-value a 'k))
-	(new-token (swap mutez token k swapped-mutez))
-	(new-mutez (- mutez swapped-mutez)))
-    (make-instance 'uniswapv1 :token new-token mutez new-mutez :k k
-			      :cost (slot-value a 'cost)
-			      :mutez-zeroes (mutez-zeroes a)
-			      :token-zeroes (token-zeroes a))))
+  (let* ((token (token a))
+	 (mutez (mutez a))
+	 (k (k a))
+	 (token-out (* (swap mutez token k swapped-mutez)) (cost u))
+	 (new-mutez (+ mutez swapped-mutez))
+	 (new-token (- token token-out)))
+    `(
+      ,token-out
+      ,(init (make-instance 'uniswapv1
+			    :token new-token
+			    mutez new-mutez :k k
+			    :cost (cost u)
+			    :token-zeroes (token-zeroes a))))))
 
 ;;;;----------------------------------------------------------------------------
 ;;;; Classes for loading swaps from disk
@@ -92,12 +109,12 @@
 		      (str:concat
 		       "SELECT \"" (token-col o) "\", \"" (mutez-col o) "\" FROM "
 		       "\"" (schema-name o) "\".\"" (table-name o) "\""
-		       "ORDER BY ID DESC LIMIT 1")))
+		       "ORDER BY ID DESC LIMIT 1") :list))
   o)
 
 ;;;; load the latest from the disk, and return an initialized swap object
 (defmethod get-latest-swap ((o ondisk))
-  (let* ((result (nth 0 (funcall (query o))))
+  (let* ((result (funcall (query o)))
 	 (token-val (nth 0 result))
 	 (mutez-val (nth 1 result)))
     (init (make-instance (swap-class o)
@@ -107,6 +124,34 @@
 			 :token-zeroes (token-zeroes o)))))
 
 ;;;;----------------------------------------------------------------------------
+
+;;;; Tests!
+
+(fiveam:def-suite my-system
+  :description "Test everything")
+
+(fiveam:def-suite test-swaps
+  :description "."
+  :in my-system)
+
+(fiveam:in-suite test-swaps)
+
+(fiveam:test test-swap1
+  (let*
+      ((swap (init (make-instance 'uniswapv1
+			    :token 46373645851255859
+			    :mutez 15032325881
+			    :cost (/ 9972 10000)
+			    :token-zeroes 6)))
+       (result (swap-token swap 137777989641182))
+       (xtz-back (car result))
+       (new-swap (car (cdr result))))
+    (p swap)
+    (fiveam:is (= (floor xtz-back) 44405039))
+    (fiveam:is (= (floor (mutez new-swap)) 14987907444))
+    (fiveam:is (= (floor (token new-swap)) 46511423840897041))))
+
+(fiveam:run! 'my-system)
 
 (progn
   (defvar vortex-kUSD-XTZ)
@@ -141,5 +186,5 @@ Vortex kUSD-XTZ
 	       (swap (get-latest-swap od)))
 	  swap)))))
 
-(swap (token swap) (mutez swap) (k swap) 100)
-(token-zeroes vortex-kUSD-XTZ)
+(format t "~7$
+" (car (swap-token swap 100)))
