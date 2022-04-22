@@ -50,8 +50,8 @@
 (defmethod tez-per-token ((u uniswapv1))
   (* (expt 10 (mutez-zeroes u)) (mutez-per-token u)))
 
-(defun swap (token mutez k swapped-token)
-  (- mutez (/ k (+ token swapped-token))))
+(defun swap (x y k swapped)
+  (- y (/ k (+ x swapped))))
 
 
 ;;;; simulate a swap of token, and return a new uniswap object with the
