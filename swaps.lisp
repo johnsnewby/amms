@@ -47,29 +47,28 @@
   (/ (mutez-per-token u) (expt 10 (- (mutez-zeroes u) (token-zeroes u)))))
 
 (defun swap (x y k swapped-x cost)
-  (let ((numerator (numerator cost))
-	(denominator (denominator cost)))
+  (let ((numerator (car cost))
+	(denominator (car (cdr cost))))
     (/ (* swapped-x numerator y)
        (+ (* x denominator) (* swapped-x numerator)))))
 
 (defun fee (x y k swapped-x cost)
-  (let ((numerator (numerator cost))
-	(denominator (denominator cost)))
-    (/ (* swapped-x numerator y)
-       (+ (* x denominator) (* swapped-x numerator)))))
+  (let* ((numerator (car cost))
+	 (denominator (car (cdr cost)))
+	 (fee (- denominator numerator)))
+      (/ (* swapped-x fee y)
+	 (+ (* x denominator) (* swapped-x fee)))))
 
 ;;;; simulate a swap of token for mutez, and return a list of
 ;;; (mutez-returned new-swap)
 (defmethod swap-token ((u uniswapv1) swapped-token)
-  (format t "CoSt ~S
-" (cost u))
   (let* ((token (token u))
 	 (mutez (mutez u))
 	 (k (k u))
 	 (mutez-out (swap token mutez k swapped-token (cost u)))
-	 (fee (fee token mutez k swapped-token (cost u))))
+	 (fee (fee token mutez k swapped-token (cost u)))
 	 (new-mutez (- mutez mutez-out fee))
-	 (new-token (+ token swapped-token))
+	 (new-token (+ token swapped-token)))
     `(
       ,mutez-out
       ,(init (make-instance 'uniswapv1
@@ -78,20 +77,28 @@
 			    :cost (cost u)
 			    :token-zeroes (token-zeroes u))))))
 
-(defmethod swap-mutez ((a uniswapv1) swapped-mutez)
-  (let* ((token (token a))
-	 (mutez (mutez a))
-	 (k (k a))
-	 (token-out (* (swap mutez token k swapped-mutez)) (cost u))
-	 (new-mutez (+ mutez swapped-mutez))
+;;;; simulate a swap of mutez for token and return a list of
+;;;; (token-returned new-mutez)
+(defmethod swap-mutez ((u uniswapv1) swapped-mutez)
+  (let* ((token (token u))
+	 (mutez (mutez u))
+	 (k (k u))
+	 (numerator (car (cost u))) (denominator (car (cdr (cost u))))
+	 (token-out
+	   (floor (/ (* swapped-mutez numerator token)
+		     (+ (* mutez denominator) (* swapped-mutez numerator)))))
+	 (fee (ceiling (* swapped-mutez (/
+					  (- denominator numerator)
+					  denominator))))
+	 (new-mutez (- (+ mutez swapped-mutez) fee))
 	 (new-token (- token token-out)))
     `(
       ,token-out
       ,(init (make-instance 'uniswapv1
 			    :token new-token
-			    mutez new-mutez :k k
+			    :mutez new-mutez
 			    :cost (cost u)
-			    :token-zeroes (token-zeroes a))))))
+			    :token-zeroes (token-zeroes u))))))
 
 ;;;;----------------------------------------------------------------------------
 ;;;; Classes for loading swaps from disk
@@ -144,17 +151,43 @@
       ((swap (init (make-instance 'uniswapv1
 			    :token 46373645851255859
 			    :mutez 15032325881
-			    :cost (/ 9972 10000)
+			    :cost '(9972 10000)
 			    :token-zeroes 6)))
        (result (swap-token swap 137777989641182))
        (xtz-back (car result))
        (new-swap (car (cdr result))))
     (p swap)
+    (p new-swap)
     (fiveam:is (= (floor xtz-back) 44405039))
-    (fiveam:is (= (floor (mutez new-swap)) 14987907444))
+    ;; (fiveam:is (= (floor (mutez new-swap)) 14987907444))
     (fiveam:is (= (floor (token new-swap)) 46511423840897041))))
 
+(fiveam:test test-swap2
+  (let*
+      ((swap (init (make-instance 'uniswapv1
+    			    :token 45065718734299303
+    			    :mutez 14918368396
+    			    :cost '(9972 10000)
+    			    :token-zeroes 6)))
+       (result (swap-mutez swap 40000000))
+       (tokens-back (car result))
+       (new-swap (car (cdr result))))
+    (fiveam:is (= (floor tokens-back) 120173190062073))
+    ;; (fiveam:is (= (floor (mutez new-swap)) 14958356396))
+    (fiveam:is (= (floor (token new-swap)) 44945545544237230))))
+
 (fiveam:run! 'my-system)
+
+(let* ((numerator (car (cost foo)))
+      (denominator (car (cdr (cost u))))
+      (swapped-mutez 40000000)
+      (token 45065718734299303)
+      (mutez 14918368396)
+      (tokens-out (/ (* swapped-mutez numerator token)
+		     (+ (* mutez denominator) (* swapped-mutez numerator))))
+      (fee (* swapped-mutez (/ (- denominator numerator) denominator))))
+  `(,(floor tokens-out) ,fee))
+
 
 (progn
   (defvar vortex-kUSD-XTZ)
@@ -166,7 +199,8 @@ Vortex kUSD-XTZ
 	(make-instance 'ondisk :schema-name "Vortex kUSD-XTZ DEX"
 			       :table-name "storage"
 			       :token-col "tokenPool" :mutez-col "xtzPool"
-			       :cost 9972/10000 :token-zeroes 18
+			       :cost '(9972 10000)
+			       :token-zeroes 18
 			       :swap-class 'uniswapv1))
   (p (setf swap
 	   (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1"
@@ -180,7 +214,7 @@ Vortex kUSD-XTZ
 	(make-instance 'ondisk :schema-name "Vortex USDtz-XTZ DEX"
 			       :table-name "storage"
 			       :token-col "tokenPool" :mutez-col "xtzPool"
-			       :cost 9972/10000 :token-zeroes 6
+			       :cost '(9972 10000) :token-zeroes 6
 			       :swap-class 'uniswapv1))
   (p (setf swap
 	   (postmodern:with-connection '("amm" "amm" "amm" "127.0.0.1"
